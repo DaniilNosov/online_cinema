@@ -1,6 +1,6 @@
 import secrets
 from datetime import datetime, timezone, timedelta
-from fastapi import HTTPException, status
+from fastapi import HTTPException, UploadFile, status
 from sqlalchemy import select, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -10,6 +10,7 @@ from src.database.models.accounts import (
     User,
     UserGroup,
     UserGroupEnum,
+    UserProfile,
     ActivationToken,
     PasswordResetToken,
     RefreshToken,
@@ -21,10 +22,13 @@ from src.schemas.accounts import (
     PasswordChangeSchema,
     PasswordResetRequestSchema,
     PasswordResetConfirmSchema,
+    UserProfileUpdateSchema,
+    UserProfileResponseSchema,
 )
 from src.security.hash import hash_password, verify_password
 from src.security.jwt import create_access_token, create_refresh_token, decode_token
 from src.notifications.emails import send_activation_email, send_password_reset_email
+from src.storages.s3 import s3_client
 
 
 async def _get_or_create_default_group(db: AsyncSession) -> UserGroup:
@@ -63,6 +67,9 @@ async def register_user(db: AsyncSession, data: UserRegisterSchema) -> dict:
     )
     db.add(new_user)
     await db.flush()
+
+    # Automatically create an empty profile for the new user
+    db.add(UserProfile(user_id=new_user.id))
 
     raw_token = secrets.token_urlsafe(32)
     activation_token = ActivationToken(
@@ -237,7 +244,6 @@ async def request_password_reset(
     )
     user = (await db.execute(stmt)).scalar_one_or_none()
 
-    # Return generic message even if user is not found to prevent email enumeration
     if not user or not user.is_active:
         return {"message": "If that email is registered and active, a reset token has been sent."}
 
@@ -284,3 +290,70 @@ async def confirm_password_reset(
     await db.commit()
 
     return {"message": "Password has been reset successfully."}
+
+
+async def get_or_create_profile(db: AsyncSession, user: User) -> UserProfile:
+    """Retrieve the user's profile or create an empty one if missing."""
+    stmt = select(UserProfile).where(UserProfile.user_id == user.id)
+    profile = (await db.execute(stmt)).scalar_one_or_none()
+
+    if not profile:
+        profile = UserProfile(user_id=user.id)
+        db.add(profile)
+        await db.commit()
+        await db.refresh(profile)
+
+    return profile
+
+
+async def update_profile(
+    db: AsyncSession, user: User, data: UserProfileUpdateSchema
+) -> UserProfileResponseSchema:
+    """Update personal profile fields for the authenticated user."""
+    profile = await get_or_create_profile(db, user)
+
+    update_data = data.model_dump(exclude_unset=True)
+    for field, value in update_data.items():
+        setattr(profile, field, value)
+
+    await db.commit()
+    await db.refresh(profile)
+    return UserProfileResponseSchema.model_validate(profile)
+
+
+async def upload_user_avatar(
+    db: AsyncSession, user: User, file: UploadFile
+) -> UserProfileResponseSchema:
+    """Upload an avatar image to S3/MinIO and save the URL in the user's profile."""
+    profile = await get_or_create_profile(db, user)
+    avatar_url = await s3_client.upload_avatar(user.id, file)
+    profile.avatar = avatar_url
+
+    await db.commit()
+    await db.refresh(profile)
+    return UserProfileResponseSchema.model_validate(profile)
+
+
+async def change_user_role(
+    db: AsyncSession, target_user_id: int, new_role: UserGroupEnum
+) -> dict:
+    """Change a user's group (role). Restricted to ADMIN users."""
+    stmt = select(User).where(User.id == target_user_id)
+    target_user = (await db.execute(stmt)).scalar_one_or_none()
+    if not target_user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Target user not found",
+        )
+
+    group_stmt = select(UserGroup).where(UserGroup.name == new_role)
+    group = (await db.execute(group_stmt)).scalar_one_or_none()
+    if not group:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Role group not found",
+        )
+
+    target_user.group_id = group.id
+    await db.commit()
+    return {"message": f"User {target_user.email} role updated to {new_role.value}."}

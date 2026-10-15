@@ -74,3 +74,17 @@ class UserProfileResponseSchema(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+class UserProfileUpdateSchema(BaseModel):
+    """Schema for updating user profile fields."""
+    first_name: Optional[str] = Field(None, max_length=100)
+    last_name: Optional[str] = Field(None, max_length=100)
+    gender: Optional[GenderEnum] = None
+    date_of_birth: Optional[date] = None
+    info: Optional[str] = None
+
+
+class UserRoleUpdateSchema(BaseModel):
+    """Schema for changing a user's group (role) by an administrator."""
+    role: UserGroupEnum
