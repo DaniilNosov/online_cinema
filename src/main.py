@@ -2,6 +2,7 @@ from fastapi import FastAPI, Depends
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 from src.database.session import get_db
+from src.routes.accounts import router as accounts_router
 
 app = FastAPI(
     title="Online Cinema API",
@@ -9,6 +10,7 @@ app = FastAPI(
     version="1.0.0",
 )
 
+app.include_router(accounts_router)
 
 @app.get("/health", tags=["System"])
 async def health_check(db: AsyncSession = Depends(get_db)):
