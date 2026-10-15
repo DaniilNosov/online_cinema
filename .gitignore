@@ -1,0 +1,24 @@
+#Secrets
+.env
+*.pem
+*.key
+
+#venv and poetry
+.venv/
+venv/
+poetry.toml
+
+# cache
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# idea
+.idea/
+
+# database
+pgdata/
+minio_data/
