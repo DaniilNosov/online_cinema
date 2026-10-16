@@ -8,6 +8,27 @@ from src.database.models.accounts import (
     PasswordResetToken,
     RefreshToken,
 )
+from src.database.models.movies import (
+    movie_genres,
+    movie_directors,
+    movie_stars,
+    favorite_movies,
+    Genre,
+    Star,
+    Director,
+    Certification,
+    Movie,
+    MovieLike,
+    MovieRating,
+    MovieComment,
+)
+from src.database.models.orders import (
+    OrderStatusEnum,
+    Cart,
+    CartItem,
+    Order,
+    OrderItem,
+)
 
 __all__ = [
     "UserGroupEnum",
@@ -18,4 +39,22 @@ __all__ = [
     "ActivationToken",
     "PasswordResetToken",
     "RefreshToken",
+    "movie_genres",
+    "movie_directors",
+    "movie_stars",
+    "favorite_movies",
+    "Genre",
+    "Star",
+    "Director",
+    "Certification",
+    "Movie",
+    "MovieLike",
+    "MovieRating",
+    "MovieComment",
+    "OrderStatusEnum",
+    "Cart",
+    "CartItem",
+    "Order",
+    "OrderItem",
 ]
+
