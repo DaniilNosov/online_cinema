@@ -1,7 +1,9 @@
 import re
 from datetime import date
 from typing import Optional
-from pydantic import BaseModel, EmailStr, Field, field_validator
+
+from pydantic import BaseModel, EmailStr, Field, field_validator, ConfigDict
+
 from src.database.models.accounts import UserGroupEnum, GenderEnum
 
 
@@ -72,8 +74,7 @@ class UserProfileResponseSchema(BaseModel):
     date_of_birth: Optional[date] = None
     info: Optional[str] = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class UserProfileUpdateSchema(BaseModel):

@@ -30,6 +30,12 @@ from src.security.jwt import create_access_token, create_refresh_token, decode_t
 from src.notifications.emails import send_activation_email, send_password_reset_email
 from src.storages.s3 import s3_client
 
+def _is_expired(expires_at: datetime) -> bool:
+    """Safely check if a datetime has expired, handling both naive and aware datetimes."""
+    if expires_at.tzinfo is None:
+        expires_at = expires_at.replace(tzinfo=timezone.utc)
+    return expires_at < datetime.now(timezone.utc)
+
 
 async def _get_or_create_default_group(db: AsyncSession) -> UserGroup:
     """Ensure standard user groups exist and return the default USER group."""
@@ -98,7 +104,7 @@ async def activate_account(db: AsyncSession, token: str) -> dict:
             detail="Invalid activation token",
         )
 
-    if token_record.expires_at < datetime.now(timezone.utc):
+    if _is_expired(token_record.expires_at):
         await db.delete(token_record)
         await db.commit()
         raise HTTPException(
@@ -195,7 +201,7 @@ async def refresh_user_token(db: AsyncSession, refresh_token: str) -> TokenRespo
     stmt = select(RefreshToken).where(RefreshToken.token == refresh_token)
     stored_token = (await db.execute(stmt)).scalar_one_or_none()
 
-    if not stored_token or stored_token.expires_at < datetime.now(timezone.utc):
+    if not stored_token or _is_expired(stored_token.expires_at):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Refresh token revoked or expired",
@@ -277,7 +283,7 @@ async def confirm_password_reset(
             detail="Invalid password reset token",
         )
 
-    if token_record.expires_at < datetime.now(timezone.utc):
+    if _is_expired(token_record.expires_at):
         await db.delete(token_record)
         await db.commit()
         raise HTTPException(
