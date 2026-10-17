@@ -39,6 +39,57 @@ services:
     volumes:
       - minio_data:/data
 
+  backend:
+    build: .
+    container_name: cinema_backend
+    restart: always
+    env_file:
+      - .env
+    environment:
+      POSTGRES_HOST: db
+      REDIS_HOST: redis
+      SMTP_HOST: mailhog
+      S3_ENDPOINT_URL: http://minio:9000
+    ports:
+      - "8000:8000"
+    depends_on:
+      - db
+      - redis
+      - mailhog
+      - minio
+
+  celery_worker:
+    build: .
+    container_name: cinema_celery_worker
+    restart: always
+    command: celery -A src.tasks.celery_app worker --loglevel=info
+    env_file:
+      - .env
+    environment:
+      POSTGRES_HOST: db
+      REDIS_HOST: redis
+      SMTP_HOST: mailhog
+      S3_ENDPOINT_URL: http://minio:9000
+    depends_on:
+      - db
+      - redis
+
+  celery_beat:
+    build: .
+    container_name: cinema_celery_beat
+    restart: always
+    command: celery -A src.tasks.celery_app beat --loglevel=info
+    env_file:
+      - .env
+    environment:
+      POSTGRES_HOST: db
+      REDIS_HOST: redis
+      SMTP_HOST: mailhog
+      S3_ENDPOINT_URL: http://minio:9000
+    depends_on:
+      - db
+      - redis
+
 volumes:
   pgdata:
   minio_data:
