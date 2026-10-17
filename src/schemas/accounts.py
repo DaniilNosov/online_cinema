@@ -1,5 +1,5 @@
 import re
-from datetime import date
+from datetime import date, datetime
 from typing import Optional
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
@@ -7,73 +7,111 @@ from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 from src.database.models.accounts import GenderEnum, UserGroupEnum
 
 
+def validate_password_complexity(password: str) -> str:
+    """Validate that the password contains uppercase, lowercase, and numeric characters."""
+    if len(password) < 8:
+        raise ValueError("Password must be at least 8 characters long")
+    if not re.search(r"[A-Z]", password):
+        raise ValueError("Password must contain at least one uppercase letter")
+    if not re.search(r"[a-z]", password):
+        raise ValueError("Password must contain at least one lowercase letter")
+    if not re.search(r"\d", password):
+        raise ValueError("Password must contain at least one digit")
+    return password
+
+
 class UserRegisterSchema(BaseModel):
-    """Schema for user registration with password complexity validation."""
+    """Schema for new user registration."""
 
     email: EmailStr
-    password: str = Field(..., min_length=8, description="Password must contain letters and numbers")
+    password: str = Field(..., min_length=8, max_length=72)
 
     @field_validator("password")
     @classmethod
-    def validate_password_complexity(cls, value: str) -> str:
-        """Enforce password complexity: at least one letter and one number."""
-        if not re.search(r"[A-Za-z]", value) or not re.search(r"\d", value):
-            raise ValueError("Password must contain at least one letter and one digit")
-        return value
+    def check_password(cls, value: str) -> str:
+        return validate_password_complexity(value)
 
 
-class UserLoginSchema(BaseModel):
-    """Schema for user authentication."""
+class UserResponseSchema(BaseModel):
+    """Schema for returning basic user information."""
+
+    id: int
+    email: EmailStr
+    is_active: bool
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class ActivationRequestSchema(BaseModel):
+    """Schema for account activation via token."""
+
+    token: str
+
+
+class LoginRequestSchema(BaseModel):
+    """Schema for user login."""
 
     email: EmailStr
     password: str
 
 
 class TokenResponseSchema(BaseModel):
-    """Schema for returning JWT token pairs."""
+    """Schema returning access and refresh JWT tokens."""
 
     access_token: str
     refresh_token: str
     token_type: str = "bearer"
 
 
-class PasswordChangeSchema(BaseModel):
-    """Schema for changing password when the old one is known."""
+class RefreshTokenRequestSchema(BaseModel):
+    """Schema for requesting a new access token."""
 
-    old_password: str
-    new_password: str = Field(..., min_length=8)
+    refresh_token: str
 
-    @field_validator("new_password")
-    @classmethod
-    def validate_password_complexity(cls, value: str) -> str:
-        if not re.search(r"[A-Za-z]", value) or not re.search(r"\d", value):
-            raise ValueError("New password must contain at least one letter and one digit")
-        return value
+
+class AccessTokenResponseSchema(BaseModel):
+    """Schema returning a newly issued access token."""
+
+    access_token: str
+    token_type: str = "bearer"
 
 
 class PasswordResetRequestSchema(BaseModel):
-    """Schema for requesting a password reset via email."""
+    """Schema for requesting a password reset email."""
 
     email: EmailStr
 
 
 class PasswordResetConfirmSchema(BaseModel):
-    """Schema for setting a new password using a reset token."""
+    """Schema for completing a password reset with a new password."""
 
     token: str
-    new_password: str = Field(..., min_length=8)
+    new_password: str = Field(..., min_length=8, max_length=72)
 
     @field_validator("new_password")
     @classmethod
-    def validate_password_complexity(cls, value: str) -> str:
-        if not re.search(r"[A-Za-z]", value) or not re.search(r"\d", value):
-            raise ValueError("New password must contain at least one letter and one digit")
-        return value
+    def check_new_password(cls, value: str) -> str:
+        return validate_password_complexity(value)
+
+
+class PasswordChangeSchema(BaseModel):
+    """Schema for changing the password of an authenticated user."""
+
+    old_password: str
+    new_password: str = Field(..., min_length=8, max_length=72)
+
+    @field_validator("new_password")
+    @classmethod
+    def check_new_password(cls, value: str) -> str:
+        return validate_password_complexity(value)
 
 
 class UserProfileResponseSchema(BaseModel):
     """Schema for displaying user profile details."""
 
+    id: int
+    user_id: int
     first_name: Optional[str] = None
     last_name: Optional[str] = None
     avatar: Optional[str] = None

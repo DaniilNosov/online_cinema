@@ -15,20 +15,24 @@ async def get_current_user(
     credentials: HTTPAuthorizationCredentials = Depends(security_scheme),
     db: AsyncSession = Depends(get_db),
 ) -> User:
-    """Validate access JWT token and return the currently authenticated user."""
+    """Validate Bearer JWT token, verify session validity, and return the active user."""
     token = credentials.credentials
-    payload = decode_token(token, token_type="access")
-
-    if not payload or "sub" not in payload:
+    payload = decode_token(token)
+    if not payload:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid or expired access token",
         )
 
-    user_id = int(payload["sub"])
-    stmt = select(User).options(selectinload(User.group)).where(User.id == user_id)
-    result = await db.execute(stmt)
-    user = result.scalar_one_or_none()
+    user_id = payload.get("sub")
+    if not user_id:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid token payload",
+        )
+
+    stmt = select(User).options(selectinload(User.group)).where(User.id == int(user_id))
+    user = (await db.execute(stmt)).scalar_one_or_none()
 
     if not user or not user.is_active:
         raise HTTPException(
@@ -36,13 +40,22 @@ async def get_current_user(
             detail="User not found or inactive",
         )
 
+    # Verify that the password has not been changed since this token was issued
+    if payload.get("pwd_fgp") != user.hashed_password[-16:]:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Session expired due to password change. Please log in again.",
+        )
+
     return user
 
 
 def require_roles(*allowed_roles: UserGroupEnum):
-    """Dependency factory for role-based access control (RBAC)."""
+    """Dependency factory restricting endpoint access to specific user groups."""
 
-    async def role_checker(current_user: User = Depends(get_current_user)) -> User:
+    async def role_checker(
+        current_user: User = Depends(get_current_user),
+    ) -> User:
         if current_user.group.name not in allowed_roles:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,

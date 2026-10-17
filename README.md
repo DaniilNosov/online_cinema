@@ -38,6 +38,7 @@ Interactive **Swagger UI** documentation is available at:
 | `PUT` | `/profile` | Update profile fields (`first_name`, `last_name`, `gender`, `date_of_birth`, `info`). | Body: `UserProfileUpdateSchema` | Bearer JWT |
 | `POST` | `/profile/avatar` | Upload a `JPEG`/`PNG`/`WEBP` avatar image to S3 (`MinIO`). | `multipart/form-data`: `file` | Bearer JWT |
 | `PATCH` | `/users/{user_id}/role` | Change a user's role (`USER`, `MODERATOR`, `ADMIN`). | Path: `user_id` (`int`), Body: `{"role": "ADMIN"}` | Admin JWT |
+| `POST` | `/change-password` | Change current password and revoke all active sessions. | Body: `{"old_password": "str", "new_password": "str"}` | Bearer JWT |
 
 ### 2. Movies, Catalog & Social Features (`/api/v1/movies`)
 
@@ -67,6 +68,7 @@ Interactive **Swagger UI** documentation is available at:
 | `POST` | `/api/v1/orders/{order_id}/confirm-payment` | Confirm order payment (`PAID`) and send email receipt. | Path: `order_id` (`int`) | Bearer JWT |
 | `POST` | `/api/v1/orders/{order_id}/cancel` | Cancel a `PENDING` order. | Path: `order_id` (`int`) | Bearer JWT |
 | `GET` | `/api/v1/orders` | List user's orders with optional `status_filter` (`PENDING`, `PAID`, `CANCELLED`). | Query: `status_filter` | Bearer JWT |
+| `POST` | `/api/v1/orders/webhook/stripe` | Verify Stripe signature, validate session/payment, and mark order `PAID` idempotently. | Header: `Stripe-Signature`, Raw Stripe Event Payload | Stripe Signature |
 
 ---
 

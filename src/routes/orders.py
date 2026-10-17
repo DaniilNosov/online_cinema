@@ -18,9 +18,6 @@ cart_router = APIRouter(prefix="/api/v1/cart", tags=["Shopping Cart"])
 orders_router = APIRouter(prefix="/api/v1/orders", tags=["Orders & Payments"])
 
 
-# --- Shopping Cart Endpoints ---
-
-
 @cart_router.get("", response_model=CartResponseSchema)
 async def get_my_cart(
     current_user: User = Depends(get_current_user),
@@ -76,9 +73,6 @@ async def get_user_cart_by_admin(
     return await orders_service.get_user_cart(db, user_id)
 
 
-# --- Orders & Payments Endpoints ---
-
-
 @orders_router.post(
     "/checkout",
     response_model=OrderResponseSchema,
@@ -122,23 +116,12 @@ async def cancel_pending_order(
     return await orders_service.cancel_order(db, current_user, order_id)
 
 
-@orders_router.post("/{order_id}/confirm-payment", response_model=OrderResponseSchema)
-async def confirm_order_payment(
-    order_id: int,
-    current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-):
-    """Confirm order payment (for testing/simulation) and send email receipt."""
-    await orders_service.get_order_by_id(db, current_user, order_id)
-    return await orders_service.mark_order_as_paid(db, order_id)
-
-
 @orders_router.post("/webhook/stripe", include_in_schema=True)
 async def stripe_webhook(
     request: Request,
     stripe_signature: Optional[str] = Header(None, alias="Stripe-Signature"),
     db: AsyncSession = Depends(get_db),
 ):
-    """Webhook endpoint for receiving Stripe checkout events."""
+    """Webhook endpoint for receiving and verifying Stripe checkout events."""
     payload = await request.body()
     return await orders_service.handle_stripe_webhook(db, payload, stripe_signature)

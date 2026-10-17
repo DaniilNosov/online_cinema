@@ -12,7 +12,9 @@ from src.database.session import get_db
 from src.main import app
 from src.security.hash import hash_password
 from src.security.jwt import create_access_token
+from src.services.orders import _processed_stripe_events
 
+# In-memory SQLite database for fast, isolated testing
 TEST_DATABASE_URL = "sqlite+aiosqlite:///:memory:"
 
 test_engine = create_async_engine(
@@ -31,6 +33,7 @@ TestingSessionLocal = async_sessionmaker(
 @pytest.fixture(autouse=True)
 async def setup_database() -> AsyncGenerator[None, None]:
     """Create all database tables before each test and drop them afterwards."""
+    _processed_stripe_events.clear()
     async with test_engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     yield
@@ -50,6 +53,7 @@ def mock_email_sending(monkeypatch: pytest.MonkeyPatch) -> AsyncMock:
     """Mock SMTP email sending globally so tests do not require MailHog."""
     mock_send = AsyncMock()
     monkeypatch.setattr("src.notifications.emails.send_email", mock_send)
+    monkeypatch.setattr("src.services.accounts.send_email", mock_send)
     monkeypatch.setattr("src.services.orders.send_email", mock_send)
     return mock_send
 
@@ -89,5 +93,12 @@ async def admin_headers(db_session: AsyncSession) -> dict:
     await db_session.commit()
     await db_session.refresh(admin_user)
 
-    token = create_access_token({"sub": str(admin_user.id), "email": admin_user.email, "role": "ADMIN"})
+    token = create_access_token(
+        {
+            "sub": str(admin_user.id),
+            "email": admin_user.email,
+            "role": "ADMIN",
+            "pwd_fgp": admin_user.hashed_password[-16:],
+        }
+    )
     return {"Authorization": f"Bearer {token}"}

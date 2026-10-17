@@ -1,5 +1,5 @@
 from decimal import Decimal
-from typing import List, Optional
+from typing import List, Optional, Set
 from uuid import uuid4
 
 import stripe
@@ -27,8 +27,7 @@ from src.schemas.orders import (
 
 stripe.api_key = settings.STRIPE_SECRET_KEY
 
-
-# --- Shopping Cart Logic ---
+_processed_stripe_events: Set[str] = set()
 
 
 async def _get_or_create_cart(db: AsyncSession, user_id: int) -> Cart:
@@ -133,9 +132,6 @@ async def clear_cart(db: AsyncSession, user: User) -> dict:
     return {"message": "Shopping cart cleared successfully."}
 
 
-# --- Orders & Stripe Checkout Logic ---
-
-
 async def checkout_order(db: AsyncSession, user: User) -> OrderResponseSchema:
     """Create a pending order from the user's cart and initiate a Stripe session."""
     cart = await _get_or_create_cart(db, user.id)
@@ -200,8 +196,8 @@ async def checkout_order(db: AsyncSession, user: User) -> OrderResponseSchema:
                 detail=f"Stripe error: {str(exc)}",
             )
     else:
-        order.stripe_session_id = f"cs_test_mock_{uuid4().hex}"
-        payment_url = f"http://localhost:8000/api/v1/orders/{order.id}/confirm-payment"
+        order.stripe_session_id = f"cs_test_{uuid4().hex}"
+        payment_url = f"https://checkout.stripe.com/pay/{order.stripe_session_id}"
 
     await db.execute(delete(CartItem).where(CartItem.cart_id == cart.id))
     await db.commit()
@@ -274,54 +270,8 @@ async def cancel_order(db: AsyncSession, user: User, order_id: int) -> OrderResp
     return OrderResponseSchema.model_validate(order)
 
 
-async def mark_order_as_paid(db: AsyncSession, order_id: int) -> OrderResponseSchema:
-    """Mark a pending order as PAID and send a confirmation email to the user."""
-    stmt = (
-        select(Order)
-        .options(
-            selectinload(Order.items).selectinload(OrderItem.movie),
-            selectinload(Order.user),
-        )
-        .where(Order.id == order_id)
-        .execution_options(populate_existing=True)
-    )
-    order = (await db.execute(stmt)).scalar_one_or_none()
-    if not order:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Order not found",
-        )
-
-    if order.status == OrderStatusEnum.PAID:
-        return OrderResponseSchema.model_validate(order)
-
-    if order.status == OrderStatusEnum.CANCELLED:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Cannot pay for a cancelled order",
-        )
-
-    order.status = OrderStatusEnum.PAID
-    await db.commit()
-
-    movie_titles = ", ".join(item.movie.name for item in order.items)
-    await send_email(
-        to_email=order.user.email,
-        subject=f"Order #{order.id} Payment Confirmed - Online Cinema",
-        body=(
-            f"Thank you for your purchase!\n\n"
-            f"Order ID: #{order.id}\n"
-            f"Movies: {movie_titles}\n"
-            f"Total Paid: ${order.total_price}\n\n"
-            f"Enjoy watching!"
-        ),
-    )
-
-    return OrderResponseSchema.model_validate(order)
-
-
 async def handle_stripe_webhook(db: AsyncSession, payload: bytes, sig_header: Optional[str]) -> dict:
-    """Process incoming Stripe webhook events to fulfill orders."""
+    """Verify and process incoming Stripe webhook events idempotently."""
     try:
         event = stripe.Webhook.construct_event(payload, sig_header, settings.STRIPE_WEBHOOK_SECRET)
     except (ValueError, stripe.SignatureVerificationError):
@@ -330,10 +280,105 @@ async def handle_stripe_webhook(db: AsyncSession, payload: bytes, sig_header: Op
             detail="Invalid Stripe webhook payload or signature",
         )
 
-    if event["type"] == "checkout.session.completed":
-        session_data = event["data"]["object"]
-        order_id = session_data.get("metadata", {}).get("order_id")
-        if order_id:
-            await mark_order_as_paid(db, int(order_id))
+    event_id = event.get("id")
+    if event_id and event_id in _processed_stripe_events:
+        return {"status": "already_processed"}
+
+    if event.get("type") == "checkout.session.completed":
+        session_data = event.get("data", {}).get("object", {})
+        metadata = session_data.get("metadata") or {}
+        order_id_raw = metadata.get("order_id")
+
+        if not order_id_raw:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Missing order_id in Stripe session metadata",
+            )
+
+        stmt = (
+            select(Order)
+            .options(
+                selectinload(Order.items).selectinload(OrderItem.movie),
+                selectinload(Order.user),
+            )
+            .where(Order.id == int(order_id_raw))
+            .execution_options(populate_existing=True)
+        )
+        order = (await db.execute(stmt)).scalar_one_or_none()
+        if not order:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Order not found",
+            )
+
+        session_id = session_data.get("id")
+        if not session_id or order.stripe_session_id != session_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Stripe session ID does not match the order",
+            )
+
+        meta_user_id = metadata.get("user_id")
+        if meta_user_id is not None and str(order.user_id) != str(meta_user_id):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Stripe session user_id does not match the order owner",
+            )
+
+        if order.status == OrderStatusEnum.PAID:
+            if event_id:
+                _processed_stripe_events.add(event_id)
+            return {"status": "already_processed"}
+
+        if order.status == OrderStatusEnum.CANCELLED:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Cannot fulfill a cancelled order",
+            )
+
+        # Validate session status, payment_status, currency, and exact payment amount
+        if session_data.get("status") != "complete":
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Stripe checkout session is not complete",
+            )
+
+        if session_data.get("payment_status") != "paid":
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Payment has not been completed",
+            )
+
+        if (session_data.get("currency") or "").lower() != "usd":
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid payment currency",
+            )
+
+        expected_amount = int(order.total_price * 100)
+        if session_data.get("amount_total") != expected_amount:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Payment amount does not match order total",
+            )
+
+        order.status = OrderStatusEnum.PAID
+        await db.commit()
+
+        if event_id:
+            _processed_stripe_events.add(event_id)
+
+        movie_titles = ", ".join(item.movie.name for item in order.items)
+        await send_email(
+            to_email=order.user.email,
+            subject=f"Order #{order.id} Payment Confirmed - Online Cinema",
+            body=(
+                f"Thank you for your purchase!\n\n"
+                f"Order ID: #{order.id}\n"
+                f"Movies: {movie_titles}\n"
+                f"Total Paid: ${order.total_price}\n\n"
+                f"Enjoy watching!"
+            ),
+        )
 
     return {"status": "success"}

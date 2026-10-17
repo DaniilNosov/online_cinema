@@ -1,5 +1,5 @@
-import secrets
 from datetime import datetime, timedelta, timezone
+from uuid import uuid4
 
 from fastapi import HTTPException, UploadFile, status
 from sqlalchemy import delete, select
@@ -16,16 +16,19 @@ from src.database.models.accounts import (
     UserGroupEnum,
     UserProfile,
 )
-from src.notifications.emails import send_activation_email, send_password_reset_email
+from src.notifications.emails import send_email
 from src.schemas.accounts import (
+    AccessTokenResponseSchema,
+    ActivationRequestSchema,
+    LoginRequestSchema,
     PasswordChangeSchema,
     PasswordResetConfirmSchema,
     PasswordResetRequestSchema,
+    RefreshTokenRequestSchema,
     TokenResponseSchema,
-    UserLoginSchema,
-    UserProfileResponseSchema,
     UserProfileUpdateSchema,
     UserRegisterSchema,
+    UserRoleUpdateSchema,
 )
 from src.security.hash import hash_password, verify_password
 from src.security.jwt import create_access_token, create_refresh_token, decode_token
@@ -39,34 +42,27 @@ def _is_expired(expires_at: datetime) -> bool:
     return expires_at < datetime.now(timezone.utc)
 
 
-async def _get_or_create_default_group(db: AsyncSession) -> UserGroup:
-    """Ensure standard user groups exist and return the default USER group."""
-    stmt = select(UserGroup).where(UserGroup.name == UserGroupEnum.USER)
-    result = await db.execute(stmt)
-    user_group = result.scalar_one_or_none()
-
-    if not user_group:
-        for role in UserGroupEnum:
-            db.add(UserGroup(name=role))
+async def _get_or_create_default_group(db: AsyncSession, role: UserGroupEnum = UserGroupEnum.USER) -> UserGroup:
+    """Fetch the specified user group or create it if it does not exist."""
+    stmt = select(UserGroup).where(UserGroup.name == role)
+    group = (await db.execute(stmt)).scalar_one_or_none()
+    if not group:
+        group = UserGroup(name=role)
+        db.add(group)
         await db.flush()
-        result = await db.execute(stmt)
-        user_group = result.scalar_one()
-
-    return user_group
+    return group
 
 
-async def register_user(db: AsyncSession, data: UserRegisterSchema) -> dict:
-    """Register a new inactive user and send an activation token via email."""
-    stmt = select(User).where(User.email == data.email)
-    existing_user = (await db.execute(stmt)).scalar_one_or_none()
-    if existing_user:
+async def register_user(db: AsyncSession, data: UserRegisterSchema) -> User:
+    """Register a new inactive user, generate an activation token, and send an email."""
+    existing = (await db.execute(select(User).where(User.email == data.email))).scalar_one_or_none()
+    if existing:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail="User with this email already exists",
+            detail="A user with this email already exists",
         )
 
-    user_group = await _get_or_create_default_group(db)
-
+    user_group = await _get_or_create_default_group(db, UserGroupEnum.USER)
     new_user = User(
         email=data.email,
         hashed_password=hash_password(data.password),
@@ -76,24 +72,29 @@ async def register_user(db: AsyncSession, data: UserRegisterSchema) -> dict:
     db.add(new_user)
     await db.flush()
 
-    # Automatically create an empty profile for the new user
-    db.add(UserProfile(user_id=new_user.id))
-
-    raw_token = secrets.token_urlsafe(32)
+    token_str = uuid4().hex
     activation_token = ActivationToken(
         user_id=new_user.id,
-        token=raw_token,
+        token=token_str,
+        expires_at=datetime.now(timezone.utc) + timedelta(hours=24),
     )
     db.add(activation_token)
     await db.commit()
+    await db.refresh(new_user)
 
-    await send_activation_email(new_user.email, raw_token)
-    return {"message": "Registration successful. Please check your email to activate your account."}
+    await send_email(
+        to_email=new_user.email,
+        subject="Activate Your Online Cinema Account",
+        body=f"Welcome! Use this token to activate your account: {token_str}",
+    )
+    return new_user
 
 
-async def activate_account(db: AsyncSession, token: str) -> dict:
+async def activate_account(db: AsyncSession, data: ActivationRequestSchema) -> dict:
     """Activate a user account using a valid activation token."""
-    stmt = select(ActivationToken).options(selectinload(ActivationToken.user)).where(ActivationToken.token == token)
+    stmt = (
+        select(ActivationToken).options(selectinload(ActivationToken.user)).where(ActivationToken.token == data.token)
+    )
     token_record = (await db.execute(stmt)).scalar_one_or_none()
 
     if not token_record:
@@ -107,48 +108,18 @@ async def activate_account(db: AsyncSession, token: str) -> dict:
         await db.commit()
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Activation token has expired. Please request a new one.",
+            detail="Activation token has expired",
         )
 
-    token_record.user.is_active = True
+    user = token_record.user
+    user.is_active = True
     await db.delete(token_record)
     await db.commit()
-
-    return {"message": "Account activated successfully."}
-
-
-async def resend_activation_token(db: AsyncSession, email: str) -> dict:
-    """Generate and send a new activation token if the previous one expired."""
-    stmt = select(User).options(selectinload(User.activation_token)).where(User.email == email)
-    user = (await db.execute(stmt)).scalar_one_or_none()
-
-    if not user:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="User with this email not found",
-        )
-
-    if user.is_active:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Account is already active",
-        )
-
-    if user.activation_token:
-        await db.delete(user.activation_token)
-        await db.flush()
-
-    raw_token = secrets.token_urlsafe(32)
-    new_token = ActivationToken(user_id=user.id, token=raw_token)
-    db.add(new_token)
-    await db.commit()
-
-    await send_activation_email(user.email, raw_token)
-    return {"message": "A new activation token has been sent to your email."}
+    return {"message": "Account activated successfully"}
 
 
-async def authenticate_user(db: AsyncSession, data: UserLoginSchema) -> TokenResponseSchema:
-    """Verify credentials and issue JWT access and refresh tokens."""
+async def login_user(db: AsyncSession, data: LoginRequestSchema) -> TokenResponseSchema:
+    """Authenticate a user and issue access and refresh JWT tokens."""
     stmt = select(User).options(selectinload(User.group)).where(User.email == data.email)
     user = (await db.execute(stmt)).scalar_one_or_none()
 
@@ -164,92 +135,99 @@ async def authenticate_user(db: AsyncSession, data: UserLoginSchema) -> TokenRes
             detail="Account is not activated. Please check your email.",
         )
 
-    payload = {"sub": str(user.id), "email": user.email, "role": user.group.name.value}
+    payload = {
+        "sub": str(user.id),
+        "email": user.email,
+        "role": user.group.name.value,
+        "pwd_fgp": user.hashed_password[-16:],
+    }
     access_token = create_access_token(payload)
-    refresh_token = create_refresh_token(payload)
+    refresh_token_str = create_refresh_token(payload)
 
     db_refresh = RefreshToken(
         user_id=user.id,
-        token=refresh_token,
+        token=refresh_token_str,
         expires_at=datetime.now(timezone.utc) + timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS),
     )
     db.add(db_refresh)
     await db.commit()
 
-    return TokenResponseSchema(access_token=access_token, refresh_token=refresh_token)
+    return TokenResponseSchema(
+        access_token=access_token,
+        refresh_token=refresh_token_str,
+    )
 
 
-async def refresh_user_token(db: AsyncSession, refresh_token: str) -> TokenResponseSchema:
-    """Issue a new access token using a valid refresh token."""
-    payload = decode_token(refresh_token, token_type="refresh")
-    if not payload or "sub" not in payload:
+async def refresh_user_token(db: AsyncSession, data: RefreshTokenRequestSchema) -> AccessTokenResponseSchema:
+    """Validate a refresh token and issue a new access token."""
+    payload = decode_token(data.refresh_token, settings.SECRET_KEY_REFRESH)
+    if not payload:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid or expired refresh token",
         )
 
-    stmt = select(RefreshToken).where(RefreshToken.token == refresh_token)
+    stmt = select(RefreshToken).where(RefreshToken.token == data.refresh_token)
     stored_token = (await db.execute(stmt)).scalar_one_or_none()
 
     if not stored_token or _is_expired(stored_token.expires_at):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Refresh token revoked or expired",
+            detail="Refresh token is invalid or has been revoked",
         )
 
-    new_payload = {
-        "sub": payload["sub"],
-        "email": payload.get("email"),
-        "role": payload.get("role"),
-    }
-    new_access_token = create_access_token(new_payload)
-    return TokenResponseSchema(access_token=new_access_token, refresh_token=refresh_token)
-
-
-async def logout_user(db: AsyncSession, refresh_token: str) -> dict:
-    """Revoke a refresh token by deleting it from the database."""
-    stmt = delete(RefreshToken).where(RefreshToken.token == refresh_token)
-    await db.execute(stmt)
-    await db.commit()
-    return {"message": "Successfully logged out."}
-
-
-async def change_user_password(db: AsyncSession, user: User, data: PasswordChangeSchema) -> dict:
-    """Change password for an authenticated user after verifying the old password."""
-    if not verify_password(data.old_password, user.hashed_password):
+    user_stmt = select(User).options(selectinload(User.group)).where(User.id == stored_token.user_id)
+    user = (await db.execute(user_stmt)).scalar_one_or_none()
+    if not user or not user.is_active:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Incorrect current password",
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="User not found or inactive",
         )
 
-    user.hashed_password = hash_password(data.new_password)
+    new_access_token = create_access_token(
+        {
+            "sub": str(user.id),
+            "email": user.email,
+            "role": user.group.name.value,
+            "pwd_fgp": user.hashed_password[-16:],
+        }
+    )
+    return AccessTokenResponseSchema(access_token=new_access_token)
+
+
+async def logout_user(db: AsyncSession, data: RefreshTokenRequestSchema) -> dict:
+    """Revoke a user's refresh token upon logout."""
+    await db.execute(delete(RefreshToken).where(RefreshToken.token == data.refresh_token))
     await db.commit()
-    return {"message": "Password changed successfully."}
+    return {"message": "Logged out successfully"}
 
 
 async def request_password_reset(db: AsyncSession, data: PasswordResetRequestSchema) -> dict:
     """Generate a password reset token and send it to the user's email."""
-    stmt = select(User).options(selectinload(User.password_reset_token)).where(User.email == data.email)
-    user = (await db.execute(stmt)).scalar_one_or_none()
+    user = (await db.execute(select(User).where(User.email == data.email))).scalar_one_or_none()
 
-    if not user or not user.is_active:
-        return {"message": "If that email is registered and active, a reset token has been sent."}
+    if user and user.is_active:
+        await db.execute(delete(PasswordResetToken).where(PasswordResetToken.user_id == user.id))
+        token_str = uuid4().hex
+        reset_token = PasswordResetToken(
+            user_id=user.id,
+            token=token_str,
+            expires_at=datetime.now(timezone.utc) + timedelta(hours=1),
+        )
+        db.add(reset_token)
+        await db.commit()
 
-    if user.password_reset_token:
-        await db.delete(user.password_reset_token)
-        await db.flush()
+        await send_email(
+            to_email=user.email,
+            subject="Password Reset Request - Online Cinema",
+            body=f"Use this token to reset your password: {token_str}",
+        )
 
-    raw_token = secrets.token_urlsafe(32)
-    reset_token = PasswordResetToken(user_id=user.id, token=raw_token)
-    db.add(reset_token)
-    await db.commit()
-
-    await send_password_reset_email(user.email, raw_token)
-    return {"message": "If that email is registered and active, a reset token has been sent."}
+    return {"message": "If that email is registered, a reset link has been sent."}
 
 
 async def confirm_password_reset(db: AsyncSession, data: PasswordResetConfirmSchema) -> dict:
-    """Reset user password using a valid password reset token."""
+    """Reset the user's password and revoke all existing access and refresh sessions."""
     stmt = (
         select(PasswordResetToken)
         .options(selectinload(PasswordResetToken.user))
@@ -271,69 +249,85 @@ async def confirm_password_reset(db: AsyncSession, data: PasswordResetConfirmSch
             detail="Password reset token has expired",
         )
 
-    token_record.user.hashed_password = hash_password(data.new_password)
+    user = token_record.user
+    user.hashed_password = hash_password(data.new_password)
+
+    # Revoke all existing refresh tokens for this user
+    await db.execute(delete(RefreshToken).where(RefreshToken.user_id == user.id))
     await db.delete(token_record)
     await db.commit()
+    return {"message": "Password has been reset successfully. All sessions revoked."}
 
-    return {"message": "Password has been reset successfully."}
+
+async def change_user_password(db: AsyncSession, user: User, data: PasswordChangeSchema) -> dict:
+    """Change the authenticated user's password and revoke all existing sessions."""
+    if not verify_password(data.old_password, user.hashed_password):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Incorrect current password",
+        )
+
+    user.hashed_password = hash_password(data.new_password)
+
+    # Revoke all existing refresh tokens for this user
+    await db.execute(delete(RefreshToken).where(RefreshToken.user_id == user.id))
+    await db.commit()
+    return {"message": "Password changed successfully. Please log in again."}
 
 
-async def get_or_create_profile(db: AsyncSession, user: User) -> UserProfile:
-    """Retrieve the user's profile or create an empty one if missing."""
-    stmt = select(UserProfile).where(UserProfile.user_id == user.id)
+async def get_or_create_profile(db: AsyncSession, user_id: int) -> UserProfile:
+    """Retrieve the user's profile or create an empty one if it does not exist."""
+    stmt = select(UserProfile).where(UserProfile.user_id == user_id)
     profile = (await db.execute(stmt)).scalar_one_or_none()
-
     if not profile:
-        profile = UserProfile(user_id=user.id)
+        profile = UserProfile(user_id=user_id)
         db.add(profile)
         await db.commit()
         await db.refresh(profile)
-
     return profile
 
 
-async def update_profile(db: AsyncSession, user: User, data: UserProfileUpdateSchema) -> UserProfileResponseSchema:
-    """Update personal profile fields for the authenticated user."""
-    profile = await get_or_create_profile(db, user)
-
+async def update_user_profile(db: AsyncSession, user_id: int, data: UserProfileUpdateSchema) -> UserProfile:
+    """Update the authenticated user's profile fields."""
+    profile = await get_or_create_profile(db, user_id)
     update_data = data.model_dump(exclude_unset=True)
     for field, value in update_data.items():
         setattr(profile, field, value)
 
     await db.commit()
     await db.refresh(profile)
-    return UserProfileResponseSchema.model_validate(profile)
+    return profile
 
 
-async def upload_user_avatar(db: AsyncSession, user: User, file: UploadFile) -> UserProfileResponseSchema:
-    """Upload an avatar image to S3/MinIO and save the URL in the user's profile."""
-    profile = await get_or_create_profile(db, user)
-    avatar_url = await s3_client.upload_avatar(user.id, file)
+async def upload_user_avatar(db: AsyncSession, user_id: int, file: UploadFile) -> UserProfile:
+    """Validate and upload an avatar image to S3 and save the URL in the user profile."""
+    if file.content_type not in ("image/jpeg", "image/png", "image/webp"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Only JPEG, PNG, and WEBP images are allowed",
+        )
+
+    content = await file.read()
+    avatar_url = await s3_client.upload_avatar(user_id, file.filename, content, file.content_type)
+
+    profile = await get_or_create_profile(db, user_id)
     profile.avatar = avatar_url
-
     await db.commit()
     await db.refresh(profile)
-    return UserProfileResponseSchema.model_validate(profile)
+    return profile
 
 
-async def change_user_role(db: AsyncSession, target_user_id: int, new_role: UserGroupEnum) -> dict:
-    """Change a user's group (role). Restricted to ADMIN users."""
-    stmt = select(User).where(User.id == target_user_id)
-    target_user = (await db.execute(stmt)).scalar_one_or_none()
-    if not target_user:
+async def change_user_role(db: AsyncSession, target_user_id: int, data: UserRoleUpdateSchema) -> User:
+    """Change a user's group (role) by an administrator."""
+    user = await db.get(User, target_user_id)
+    if not user:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Target user not found",
+            detail="User not found",
         )
 
-    group_stmt = select(UserGroup).where(UserGroup.name == new_role)
-    group = (await db.execute(group_stmt)).scalar_one_or_none()
-    if not group:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Role group not found",
-        )
-
-    target_user.group_id = group.id
+    group = await _get_or_create_default_group(db, data.role)
+    user.group_id = group.id
     await db.commit()
-    return {"message": f"User {target_user.email} role updated to {new_role.value}."}
+    await db.refresh(user)
+    return user
