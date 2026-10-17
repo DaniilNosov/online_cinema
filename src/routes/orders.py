@@ -1,10 +1,11 @@
 from typing import List, Optional
+
 from fastapi import APIRouter, Depends, Header, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.database.session import get_db
 from src.database.models.accounts import User, UserGroupEnum
 from src.database.models.orders import OrderStatusEnum
+from src.database.session import get_db
 from src.schemas.orders import (
     CartItemAddSchema,
     CartResponseSchema,
@@ -18,6 +19,7 @@ orders_router = APIRouter(prefix="/api/v1/orders", tags=["Orders & Payments"])
 
 
 # --- Shopping Cart Endpoints ---
+
 
 @cart_router.get("", response_model=CartResponseSchema)
 async def get_my_cart(
@@ -75,6 +77,7 @@ async def get_user_cart_by_admin(
 
 
 # --- Orders & Payments Endpoints ---
+
 
 @orders_router.post(
     "/checkout",

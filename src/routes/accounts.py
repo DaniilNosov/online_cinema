@@ -1,17 +1,17 @@
-from fastapi import APIRouter, Depends, Body, UploadFile, File, status
+from fastapi import APIRouter, Body, Depends, File, UploadFile, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.database.session import get_db
 from src.database.models.accounts import User, UserGroupEnum
+from src.database.session import get_db
 from src.schemas.accounts import (
-    UserRegisterSchema,
-    UserLoginSchema,
-    TokenResponseSchema,
     PasswordChangeSchema,
-    PasswordResetRequestSchema,
     PasswordResetConfirmSchema,
-    UserProfileUpdateSchema,
+    PasswordResetRequestSchema,
+    TokenResponseSchema,
+    UserLoginSchema,
     UserProfileResponseSchema,
+    UserProfileUpdateSchema,
+    UserRegisterSchema,
     UserRoleUpdateSchema,
 )
 from src.security.dependencies import get_current_user, require_roles

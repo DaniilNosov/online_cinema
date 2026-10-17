@@ -1,9 +1,7 @@
 from httpx import AsyncClient
 
 
-async def test_cart_checkout_and_payment_flow(
-    client: AsyncClient, admin_headers: dict
-):
+async def test_cart_checkout_and_payment_flow(client: AsyncClient, admin_headers: dict):
     """Test adding a movie to cart, checking out, confirming payment, and duplicate purchase prevention."""
     cert = (await client.post("/api/v1/movies/certifications", headers=admin_headers, json={"name": "R"})).json()
     movie_res = await client.post(
@@ -40,9 +38,7 @@ async def test_cart_checkout_and_payment_flow(
     empty_cart = await client.get("/api/v1/cart", headers=admin_headers)
     assert empty_cart.json()["total_items"] == 0
 
-    pay_res = await client.post(
-        f"/api/v1/orders/{order_id}/confirm-payment", headers=admin_headers
-    )
+    pay_res = await client.post(f"/api/v1/orders/{order_id}/confirm-payment", headers=admin_headers)
     assert pay_res.status_code == 200
     assert pay_res.json()["status"] == "PAID"
 

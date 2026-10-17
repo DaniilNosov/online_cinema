@@ -39,7 +39,19 @@ requires = ["poetry-core>=2.0.0,<3.0.0"]
 build-backend = "poetry.core.masonry.api"
 
 [tool.black]
-line-length = 88
+line-length = 120
+target-version = ["py311"]
+extend-exclude = '''
+/(
+    alembic/versions
+  | \.venv
+)/
+'''
+
+[tool.isort]
+profile = "black"
+line_length = 120
+skip_glob = ["alembic/versions/*", ".venv/*"]
 
 [tool.mypy]
 python_version = "3.11"
@@ -54,7 +66,8 @@ dev = [
     "black (>=26.10.1,<27.0.0)",
     "mypy (>=2.4.0,<3.0.0)",
     "httpx (>=0.28.1,<0.29.0)",
-    "aiosqlite (>=0.22.1,<0.23.0)"
+    "aiosqlite (>=0.22.1,<0.23.0)",
+    "isort (>=9.0.2,<10.0.0)"
 ]
 
 [tool.pytest.ini_options]

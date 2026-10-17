@@ -1,37 +1,36 @@
-from typing import Optional, List
+from typing import List, Optional
+
 from fastapi import HTTPException, status
-from sqlalchemy import select, func, or_, delete, insert
+from sqlalchemy import delete, func, insert, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from src.database.models.accounts import User, UserGroupEnum
 from src.database.models.movies import (
-    Genre,
-    Star,
-    Director,
     Certification,
+    Director,
+    Genre,
     Movie,
+    MovieComment,
     MovieLike,
     MovieRating,
-    MovieComment,
-    movie_genres,
+    Star,
     favorite_movies,
+    movie_genres,
 )
 from src.schemas.movies import (
     BaseNameSchema,
-    EntityResponseSchema,
     GenreWithCountSchema,
-    MovieCreateSchema,
-    MovieUpdateSchema,
-    MovieListItemSchema,
-    MovieDetailSchema,
-    PaginatedMoviesResponseSchema,
-    MovieLikeSchema,
-    MovieRatingSchema,
     MovieCommentCreateSchema,
     MovieCommentResponseSchema,
+    MovieCreateSchema,
+    MovieDetailSchema,
+    MovieLikeSchema,
+    MovieListItemSchema,
+    MovieRatingSchema,
+    MovieUpdateSchema,
+    PaginatedMoviesResponseSchema,
 )
-
 
 
 async def get_genres_with_counts(db: AsyncSession) -> List[GenreWithCountSchema]:
@@ -43,10 +42,7 @@ async def get_genres_with_counts(db: AsyncSession) -> List[GenreWithCountSchema]
         .order_by(Genre.name)
     )
     rows = (await db.execute(stmt)).all()
-    return [
-        GenreWithCountSchema(id=row.id, name=row.name, movie_count=row.movie_count)
-        for row in rows
-    ]
+    return [GenreWithCountSchema(id=row.id, name=row.name, movie_count=row.movie_count) for row in rows]
 
 
 async def create_named_entity(db: AsyncSession, model, data: BaseNameSchema):
@@ -98,7 +94,6 @@ async def delete_named_entity(db: AsyncSession, model, entity_id: int) -> dict:
     return {"message": f"{model.__name__} deleted successfully."}
 
 
-
 async def list_movies(
     db: AsyncSession,
     page: int = 1,
@@ -112,11 +107,7 @@ async def list_movies(
     favorites_only_user_id: Optional[int] = None,
 ) -> PaginatedMoviesResponseSchema:
     """Retrieve paginated, filtered, searched, and sorted movies."""
-    stmt = (
-        select(Movie)
-        .options(selectinload(Movie.certification), selectinload(Movie.genres))
-        .distinct()
-    )
+    stmt = select(Movie).options(selectinload(Movie.certification), selectinload(Movie.genres)).distinct()
 
     if favorites_only_user_id is not None:
         stmt = stmt.join(favorite_movies, Movie.id == favorite_movies.c.movie_id).where(
@@ -196,24 +187,18 @@ async def get_movie_detail(db: AsyncSession, movie_id: int) -> MovieDetailSchema
 
     likes_count = (
         await db.execute(
-            select(func.count(MovieLike.id)).where(
-                MovieLike.movie_id == movie_id, MovieLike.is_like.is_(True)
-            )
+            select(func.count(MovieLike.id)).where(MovieLike.movie_id == movie_id, MovieLike.is_like.is_(True))
         )
     ).scalar_one()
 
     dislikes_count = (
         await db.execute(
-            select(func.count(MovieLike.id)).where(
-                MovieLike.movie_id == movie_id, MovieLike.is_like.is_(False)
-            )
+            select(func.count(MovieLike.id)).where(MovieLike.movie_id == movie_id, MovieLike.is_like.is_(False))
         )
     ).scalar_one()
 
     avg_rating = (
-        await db.execute(
-            select(func.avg(MovieRating.rating)).where(MovieRating.movie_id == movie_id)
-        )
+        await db.execute(select(func.avg(MovieRating.rating)).where(MovieRating.movie_id == movie_id))
     ).scalar_one()
 
     detail = MovieDetailSchema.model_validate(movie)
@@ -225,9 +210,7 @@ async def get_movie_detail(db: AsyncSession, movie_id: int) -> MovieDetailSchema
 
 async def create_movie(db: AsyncSession, data: MovieCreateSchema) -> MovieDetailSchema:
     """Create a new movie and link its genres, directors, and stars."""
-    dup_stmt = select(Movie).where(
-        Movie.name == data.name, Movie.year == data.year, Movie.time == data.time
-    )
+    dup_stmt = select(Movie).where(Movie.name == data.name, Movie.year == data.year, Movie.time == data.time)
     if (await db.execute(dup_stmt)).scalar_one_or_none():
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -241,9 +224,21 @@ async def create_movie(db: AsyncSession, data: MovieCreateSchema) -> MovieDetail
             detail="Certification not found",
         )
 
-    genres = list((await db.execute(select(Genre).where(Genre.id.in_(data.genre_ids)))).scalars().all()) if data.genre_ids else []
-    directors = list((await db.execute(select(Director).where(Director.id.in_(data.director_ids)))).scalars().all()) if data.director_ids else []
-    stars = list((await db.execute(select(Star).where(Star.id.in_(data.star_ids)))).scalars().all()) if data.star_ids else []
+    genres = (
+        list((await db.execute(select(Genre).where(Genre.id.in_(data.genre_ids)))).scalars().all())
+        if data.genre_ids
+        else []
+    )
+    directors = (
+        list((await db.execute(select(Director).where(Director.id.in_(data.director_ids)))).scalars().all())
+        if data.director_ids
+        else []
+    )
+    stars = (
+        list((await db.execute(select(Star).where(Star.id.in_(data.star_ids)))).scalars().all())
+        if data.star_ids
+        else []
+    )
 
     movie = Movie(
         name=data.name,
@@ -265,9 +260,7 @@ async def create_movie(db: AsyncSession, data: MovieCreateSchema) -> MovieDetail
     return await get_movie_detail(db, movie.id)
 
 
-async def update_movie(
-    db: AsyncSession, movie_id: int, data: MovieUpdateSchema
-) -> MovieDetailSchema:
+async def update_movie(db: AsyncSession, movie_id: int, data: MovieUpdateSchema) -> MovieDetailSchema:
     """Update an existing movie's attributes and relationships."""
     stmt = (
         select(Movie)
@@ -289,15 +282,23 @@ async def update_movie(
 
     if "genre_ids" in update_fields:
         genre_ids = update_fields.pop("genre_ids") or []
-        movie.genres = list((await db.execute(select(Genre).where(Genre.id.in_(genre_ids)))).scalars().all()) if genre_ids else []
+        movie.genres = (
+            list((await db.execute(select(Genre).where(Genre.id.in_(genre_ids)))).scalars().all()) if genre_ids else []
+        )
 
     if "director_ids" in update_fields:
         director_ids = update_fields.pop("director_ids") or []
-        movie.directors = list((await db.execute(select(Director).where(Director.id.in_(director_ids)))).scalars().all()) if director_ids else []
+        movie.directors = (
+            list((await db.execute(select(Director).where(Director.id.in_(director_ids)))).scalars().all())
+            if director_ids
+            else []
+        )
 
     if "star_ids" in update_fields:
         star_ids = update_fields.pop("star_ids") or []
-        movie.stars = list((await db.execute(select(Star).where(Star.id.in_(star_ids)))).scalars().all()) if star_ids else []
+        movie.stars = (
+            list((await db.execute(select(Star).where(Star.id.in_(star_ids)))).scalars().all()) if star_ids else []
+        )
 
     for field, value in update_fields.items():
         setattr(movie, field, value)
@@ -319,17 +320,12 @@ async def delete_movie(db: AsyncSession, movie_id: int) -> dict:
     return {"message": "Movie deleted successfully."}
 
 
-
-async def toggle_movie_like(
-    db: AsyncSession, user: User, movie_id: int, data: MovieLikeSchema
-) -> dict:
+async def toggle_movie_like(db: AsyncSession, user: User, movie_id: int, data: MovieLikeSchema) -> dict:
     """Set or update a user's like/dislike on a movie."""
     if not await db.get(Movie, movie_id):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Movie not found")
 
-    stmt = select(MovieLike).where(
-        MovieLike.user_id == user.id, MovieLike.movie_id == movie_id
-    )
+    stmt = select(MovieLike).where(MovieLike.user_id == user.id, MovieLike.movie_id == movie_id)
     existing = (await db.execute(stmt)).scalar_one_or_none()
 
     if existing:
@@ -342,16 +338,12 @@ async def toggle_movie_like(
     return {"message": f"Movie successfully {action}."}
 
 
-async def rate_movie(
-    db: AsyncSession, user: User, movie_id: int, data: MovieRatingSchema
-) -> dict:
+async def rate_movie(db: AsyncSession, user: User, movie_id: int, data: MovieRatingSchema) -> dict:
     """Rate a movie on a 1-10 scale (creates or updates the user's rating)."""
     if not await db.get(Movie, movie_id):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Movie not found")
 
-    stmt = select(MovieRating).where(
-        MovieRating.user_id == user.id, MovieRating.movie_id == movie_id
-    )
+    stmt = select(MovieRating).where(MovieRating.user_id == user.id, MovieRating.movie_id == movie_id)
     existing = (await db.execute(stmt)).scalar_one_or_none()
 
     if existing:
@@ -426,15 +418,9 @@ async def create_comment(
     return MovieCommentResponseSchema.model_validate(comment)
 
 
-async def list_movie_comments(
-    db: AsyncSession, movie_id: int
-) -> List[MovieCommentResponseSchema]:
+async def list_movie_comments(db: AsyncSession, movie_id: int) -> List[MovieCommentResponseSchema]:
     """List all comments for a given movie ordered chronologically."""
-    stmt = (
-        select(MovieComment)
-        .where(MovieComment.movie_id == movie_id)
-        .order_by(MovieComment.created_at.asc())
-    )
+    stmt = select(MovieComment).where(MovieComment.movie_id == movie_id).order_by(MovieComment.created_at.asc())
     comments = (await db.execute(stmt)).scalars().all()
     return [MovieCommentResponseSchema.model_validate(c) for c in comments]
 

@@ -1,14 +1,15 @@
 import asyncio
 from datetime import datetime, timezone
+
 from sqlalchemy import delete
 
-from src.tasks.celery_app import celery_app
-from src.database.session import AsyncSessionLocal, engine
 from src.database.models.accounts import (
     ActivationToken,
     PasswordResetToken,
     RefreshToken,
 )
+from src.database.session import AsyncSessionLocal, engine
+from src.tasks.celery_app import celery_app
 
 
 async def _cleanup_expired_tokens_async() -> dict:
@@ -16,15 +17,9 @@ async def _cleanup_expired_tokens_async() -> dict:
     now = datetime.now(timezone.utc)
     try:
         async with AsyncSessionLocal() as session:
-            act_res = await session.execute(
-                delete(ActivationToken).where(ActivationToken.expires_at < now)
-            )
-            pwd_res = await session.execute(
-                delete(PasswordResetToken).where(PasswordResetToken.expires_at < now)
-            )
-            ref_res = await session.execute(
-                delete(RefreshToken).where(RefreshToken.expires_at < now)
-            )
+            act_res = await session.execute(delete(ActivationToken).where(ActivationToken.expires_at < now))
+            pwd_res = await session.execute(delete(PasswordResetToken).where(PasswordResetToken.expires_at < now))
+            ref_res = await session.execute(delete(RefreshToken).where(RefreshToken.expires_at < now))
             await session.commit()
 
             return {

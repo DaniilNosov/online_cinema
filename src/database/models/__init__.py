@@ -1,33 +1,33 @@
 from src.database.models.accounts import (
-    UserGroupEnum,
-    GenderEnum,
-    UserGroup,
-    User,
-    UserProfile,
     ActivationToken,
+    GenderEnum,
     PasswordResetToken,
     RefreshToken,
+    User,
+    UserGroup,
+    UserGroupEnum,
+    UserProfile,
 )
 from src.database.models.movies import (
-    movie_genres,
-    movie_directors,
-    movie_stars,
-    favorite_movies,
-    Genre,
-    Star,
-    Director,
     Certification,
+    Director,
+    Genre,
     Movie,
+    MovieComment,
     MovieLike,
     MovieRating,
-    MovieComment,
+    Star,
+    favorite_movies,
+    movie_directors,
+    movie_genres,
+    movie_stars,
 )
 from src.database.models.orders import (
-    OrderStatusEnum,
     Cart,
     CartItem,
     Order,
     OrderItem,
+    OrderStatusEnum,
 )
 
 __all__ = [
@@ -57,4 +57,3 @@ __all__ = [
     "Order",
     "OrderItem",
 ]
-

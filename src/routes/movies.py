@@ -1,22 +1,23 @@
-from typing import Optional, List
+from typing import List, Optional
+
 from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.database.session import get_db
 from src.database.models.accounts import User, UserGroupEnum
-from src.database.models.movies import Genre, Star, Director, Certification
+from src.database.models.movies import Certification, Director, Genre, Star
+from src.database.session import get_db
 from src.schemas.movies import (
     BaseNameSchema,
     EntityResponseSchema,
     GenreWithCountSchema,
-    MovieCreateSchema,
-    MovieUpdateSchema,
-    MovieDetailSchema,
-    PaginatedMoviesResponseSchema,
-    MovieLikeSchema,
-    MovieRatingSchema,
     MovieCommentCreateSchema,
     MovieCommentResponseSchema,
+    MovieCreateSchema,
+    MovieDetailSchema,
+    MovieLikeSchema,
+    MovieRatingSchema,
+    MovieUpdateSchema,
+    PaginatedMoviesResponseSchema,
 )
 from src.security.dependencies import get_current_user, require_roles
 from src.services import movies as movies_service
@@ -48,9 +49,7 @@ async def create_genre(data: BaseNameSchema, db: AsyncSession = Depends(get_db))
     response_model=EntityResponseSchema,
     dependencies=[Depends(moderator_or_admin)],
 )
-async def update_genre(
-    genre_id: int, data: BaseNameSchema, db: AsyncSession = Depends(get_db)
-):
+async def update_genre(genre_id: int, data: BaseNameSchema, db: AsyncSession = Depends(get_db)):
     """Update a genre by ID (Moderator/Admin only)."""
     return await movies_service.update_named_entity(db, Genre, genre_id, data)
 
@@ -59,7 +58,6 @@ async def update_genre(
 async def delete_genre(genre_id: int, db: AsyncSession = Depends(get_db)):
     """Delete a genre by ID (Moderator/Admin only)."""
     return await movies_service.delete_named_entity(db, Genre, genre_id)
-
 
 
 @router.get("/stars", response_model=List[EntityResponseSchema])
@@ -84,9 +82,7 @@ async def create_star(data: BaseNameSchema, db: AsyncSession = Depends(get_db)):
     response_model=EntityResponseSchema,
     dependencies=[Depends(moderator_or_admin)],
 )
-async def update_star(
-    star_id: int, data: BaseNameSchema, db: AsyncSession = Depends(get_db)
-):
+async def update_star(star_id: int, data: BaseNameSchema, db: AsyncSession = Depends(get_db)):
     """Update a star by ID (Moderator/Admin only)."""
     return await movies_service.update_named_entity(db, Star, star_id, data)
 
@@ -95,7 +91,6 @@ async def update_star(
 async def delete_star(star_id: int, db: AsyncSession = Depends(get_db)):
     """Delete a star by ID (Moderator/Admin only)."""
     return await movies_service.delete_named_entity(db, Star, star_id)
-
 
 
 @router.get("/directors", response_model=List[EntityResponseSchema])
@@ -120,9 +115,7 @@ async def create_director(data: BaseNameSchema, db: AsyncSession = Depends(get_d
     response_model=EntityResponseSchema,
     dependencies=[Depends(moderator_or_admin)],
 )
-async def update_director(
-    director_id: int, data: BaseNameSchema, db: AsyncSession = Depends(get_db)
-):
+async def update_director(director_id: int, data: BaseNameSchema, db: AsyncSession = Depends(get_db)):
     """Update a director by ID (Moderator/Admin only)."""
     return await movies_service.update_named_entity(db, Director, director_id, data)
 
@@ -131,7 +124,6 @@ async def update_director(
 async def delete_director(director_id: int, db: AsyncSession = Depends(get_db)):
     """Delete a director by ID (Moderator/Admin only)."""
     return await movies_service.delete_named_entity(db, Director, director_id)
-
 
 
 @router.get("/certifications", response_model=List[EntityResponseSchema])
@@ -149,7 +141,6 @@ async def get_certifications(db: AsyncSession = Depends(get_db)):
 async def create_certification(data: BaseNameSchema, db: AsyncSession = Depends(get_db)):
     """Create a new certification (Moderator/Admin only)."""
     return await movies_service.create_named_entity(db, Certification, data)
-
 
 
 @router.get("/favorites", response_model=PaginatedMoviesResponseSchema)
@@ -181,7 +172,6 @@ async def get_favorite_movies(
         sort_by=sort_by,
         favorites_only_user_id=current_user.id,
     )
-
 
 
 @router.get("", response_model=PaginatedMoviesResponseSchema)
@@ -235,9 +225,7 @@ async def create_movie(data: MovieCreateSchema, db: AsyncSession = Depends(get_d
     response_model=MovieDetailSchema,
     dependencies=[Depends(moderator_or_admin)],
 )
-async def update_movie(
-    movie_id: int, data: MovieUpdateSchema, db: AsyncSession = Depends(get_db)
-):
+async def update_movie(movie_id: int, data: MovieUpdateSchema, db: AsyncSession = Depends(get_db)):
     """Update a movie's details (Moderator/Admin only)."""
     return await movies_service.update_movie(db, movie_id, data)
 

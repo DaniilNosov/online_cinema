@@ -1,7 +1,8 @@
 import uuid
+
 import boto3
 from botocore.exceptions import ClientError
-from fastapi import UploadFile, HTTPException, status
+from fastapi import HTTPException, UploadFile, status
 
 from src.config.settings import settings
 

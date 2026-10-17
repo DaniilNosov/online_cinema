@@ -1,15 +1,17 @@
 from httpx import AsyncClient
 
 
-async def test_movies_crud_and_social_features(
-    client: AsyncClient, admin_headers: dict
-):
+async def test_movies_crud_and_social_features(client: AsyncClient, admin_headers: dict):
     """Test creating movie metadata, movies, catalog filtering, likes, ratings, and comments."""
     # 1. Create Certification, Genre, Director, Star
     cert = (await client.post("/api/v1/movies/certifications", headers=admin_headers, json={"name": "PG-13"})).json()
     genre = (await client.post("/api/v1/movies/genres", headers=admin_headers, json={"name": "Sci-Fi"})).json()
-    director = (await client.post("/api/v1/movies/directors", headers=admin_headers, json={"name": "Christopher Nolan"})).json()
-    star = (await client.post("/api/v1/movies/stars", headers=admin_headers, json={"name": "Matthew McConaughey"})).json()
+    director = (
+        await client.post("/api/v1/movies/directors", headers=admin_headers, json={"name": "Christopher Nolan"})
+    ).json()
+    star = (
+        await client.post("/api/v1/movies/stars", headers=admin_headers, json={"name": "Matthew McConaughey"})
+    ).json()
 
     # 2. Create Movie
     movie_payload = {
@@ -35,14 +37,10 @@ async def test_movies_crud_and_social_features(
     assert catalog_res.status_code == 200
     assert catalog_res.json()["total"] == 1
 
-    like_res = await client.post(
-        f"/api/v1/movies/{movie_id}/like", headers=admin_headers, json={"is_like": True}
-    )
+    like_res = await client.post(f"/api/v1/movies/{movie_id}/like", headers=admin_headers, json={"is_like": True})
     assert like_res.status_code == 200
 
-    rate_res = await client.post(
-        f"/api/v1/movies/{movie_id}/rate", headers=admin_headers, json={"rating": 10}
-    )
+    rate_res = await client.post(f"/api/v1/movies/{movie_id}/rate", headers=admin_headers, json={"rating": 10})
     assert rate_res.status_code == 200
 
     fav_res = await client.post(f"/api/v1/movies/{movie_id}/favorite", headers=admin_headers)

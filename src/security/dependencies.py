@@ -1,11 +1,11 @@
 from fastapi import Depends, HTTPException, status
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from src.database.session import get_db
 from src.database.models.accounts import User, UserGroupEnum
+from src.database.session import get_db
 from src.security.jwt import decode_token
 
 security_scheme = HTTPBearer()
@@ -26,11 +26,7 @@ async def get_current_user(
         )
 
     user_id = int(payload["sub"])
-    stmt = (
-        select(User)
-        .options(selectinload(User.group))
-        .where(User.id == user_id)
-    )
+    stmt = select(User).options(selectinload(User.group)).where(User.id == user_id)
     result = await db.execute(stmt)
     user = result.scalar_one_or_none()
 
@@ -45,6 +41,7 @@ async def get_current_user(
 
 def require_roles(*allowed_roles: UserGroupEnum):
     """Dependency factory for role-based access control (RBAC)."""
+
     async def role_checker(current_user: User = Depends(get_current_user)) -> User:
         if current_user.group.name not in allowed_roles:
             raise HTTPException(

@@ -1,4 +1,5 @@
 from unittest.mock import AsyncMock
+
 import pytest
 from httpx import AsyncClient
 from sqlalchemy import select
@@ -7,9 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.database.models.accounts import ActivationToken
 
 
-async def test_register_activate_and_login_flow(
-    client: AsyncClient, db_session: AsyncSession
-):
+async def test_register_activate_and_login_flow(client: AsyncClient, db_session: AsyncSession):
     """Test complete user registration, email activation, and JWT login flow."""
     # 1. Register a new user
     reg_response = await client.post(

@@ -4,7 +4,7 @@ from uuid import uuid4
 
 import stripe
 from fastapi import HTTPException, status
-from sqlalchemy import select, delete
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -20,8 +20,8 @@ from src.database.models.orders import (
 )
 from src.notifications.emails import send_email
 from src.schemas.orders import (
-    CartResponseSchema,
     CartItemResponseSchema,
+    CartResponseSchema,
     OrderResponseSchema,
 )
 
@@ -29,6 +29,7 @@ stripe.api_key = settings.STRIPE_SECRET_KEY
 
 
 # --- Shopping Cart Logic ---
+
 
 async def _get_or_create_cart(db: AsyncSession, user_id: int) -> Cart:
     """Retrieve the user's cart with all items and movies, or create one if missing."""
@@ -49,9 +50,7 @@ async def _get_or_create_cart(db: AsyncSession, user_id: int) -> Cart:
     return cart
 
 
-async def _is_movie_already_purchased(
-    db: AsyncSession, user_id: int, movie_id: int
-) -> bool:
+async def _is_movie_already_purchased(db: AsyncSession, user_id: int, movie_id: int) -> bool:
     """Check whether the user has already purchased the movie in a PAID order."""
     stmt = (
         select(OrderItem.id)
@@ -80,9 +79,7 @@ async def get_user_cart(db: AsyncSession, user_id: int) -> CartResponseSchema:
     )
 
 
-async def add_movie_to_cart(
-    db: AsyncSession, user: User, movie_id: int
-) -> CartResponseSchema:
+async def add_movie_to_cart(db: AsyncSession, user: User, movie_id: int) -> CartResponseSchema:
     """Add a movie to the user's shopping cart after validating eligibility."""
     movie = await db.get(Movie, movie_id)
     if not movie:
@@ -112,14 +109,10 @@ async def add_movie_to_cart(
     return await get_user_cart(db, user.id)
 
 
-async def remove_movie_from_cart(
-    db: AsyncSession, user: User, movie_id: int
-) -> CartResponseSchema:
+async def remove_movie_from_cart(db: AsyncSession, user: User, movie_id: int) -> CartResponseSchema:
     """Remove a specific movie from the user's shopping cart."""
     cart = await _get_or_create_cart(db, user.id)
-    stmt = delete(CartItem).where(
-        CartItem.cart_id == cart.id, CartItem.movie_id == movie_id
-    )
+    stmt = delete(CartItem).where(CartItem.cart_id == cart.id, CartItem.movie_id == movie_id)
     result = await db.execute(stmt)
     await db.commit()
 
@@ -141,6 +134,7 @@ async def clear_cart(db: AsyncSession, user: User) -> dict:
 
 
 # --- Orders & Stripe Checkout Logic ---
+
 
 async def checkout_order(db: AsyncSession, user: User) -> OrderResponseSchema:
     """Create a pending order from the user's cart and initiate a Stripe session."""
@@ -237,9 +231,7 @@ async def list_user_orders(
     return [OrderResponseSchema.model_validate(o) for o in orders]
 
 
-async def get_order_by_id(
-    db: AsyncSession, user: User, order_id: int
-) -> OrderResponseSchema:
+async def get_order_by_id(db: AsyncSession, user: User, order_id: int) -> OrderResponseSchema:
     """Retrieve a specific order belonging to the user."""
     stmt = (
         select(Order)
@@ -328,14 +320,10 @@ async def mark_order_as_paid(db: AsyncSession, order_id: int) -> OrderResponseSc
     return OrderResponseSchema.model_validate(order)
 
 
-async def handle_stripe_webhook(
-    db: AsyncSession, payload: bytes, sig_header: Optional[str]
-) -> dict:
+async def handle_stripe_webhook(db: AsyncSession, payload: bytes, sig_header: Optional[str]) -> dict:
     """Process incoming Stripe webhook events to fulfill orders."""
     try:
-        event = stripe.Webhook.construct_event(
-            payload, sig_header, settings.STRIPE_WEBHOOK_SECRET
-        )
+        event = stripe.Webhook.construct_event(payload, sig_header, settings.STRIPE_WEBHOOK_SECRET)
     except (ValueError, stripe.SignatureVerificationError):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,

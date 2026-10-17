@@ -2,14 +2,14 @@ from typing import AsyncGenerator
 from unittest.mock import AsyncMock
 
 import pytest
-from httpx import AsyncClient, ASGITransport
-from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
+from httpx import ASGITransport, AsyncClient
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
 
-from src.main import app
 from src.database.base import Base
-from src.database.session import get_db
 from src.database.models.accounts import User, UserGroup, UserGroupEnum
+from src.database.session import get_db
+from src.main import app
 from src.security.hash import hash_password
 from src.security.jwt import create_access_token
 
@@ -57,6 +57,7 @@ def mock_email_sending(monkeypatch: pytest.MonkeyPatch) -> AsyncMock:
 @pytest.fixture
 async def client(db_session: AsyncSession) -> AsyncGenerator[AsyncClient, None]:
     """Provide an async HTTP test client with overridden database dependency."""
+
     async def override_get_db() -> AsyncGenerator[AsyncSession, None]:
         yield db_session
 
@@ -75,9 +76,7 @@ async def admin_headers(db_session: AsyncSession) -> dict:
     await db_session.flush()
 
     admin_group = (
-        await db_session.execute(
-            UserGroup.__table__.select().where(UserGroup.name == UserGroupEnum.ADMIN)
-        )
+        await db_session.execute(UserGroup.__table__.select().where(UserGroup.name == UserGroupEnum.ADMIN))
     ).first()
 
     admin_user = User(
@@ -90,7 +89,5 @@ async def admin_headers(db_session: AsyncSession) -> dict:
     await db_session.commit()
     await db_session.refresh(admin_user)
 
-    token = create_access_token(
-        {"sub": str(admin_user.id), "email": admin_user.email, "role": "ADMIN"}
-    )
+    token = create_access_token({"sub": str(admin_user.id), "email": admin_user.email, "role": "ADMIN"})
     return {"Authorization": f"Bearer {token}"}

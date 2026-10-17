@@ -1,4 +1,5 @@
 from celery import Celery
+
 from src.config.settings import settings
 
 redis_url = f"redis://{settings.REDIS_HOST}:{settings.REDIS_PORT}/0"

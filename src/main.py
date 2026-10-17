@@ -1,6 +1,7 @@
-from fastapi import FastAPI, Depends
+from fastapi import Depends, FastAPI
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
+
 from src.database.session import get_db
 from src.routes.accounts import router as accounts_router
 from src.routes.movies import router as movies_router

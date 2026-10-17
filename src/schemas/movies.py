@@ -1,28 +1,33 @@
-from uuid import UUID
 from datetime import datetime
 from decimal import Decimal
-from typing import Optional, List
-from pydantic import BaseModel, Field, ConfigDict
+from typing import List, Optional
+from uuid import UUID
+
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class BaseNameSchema(BaseModel):
     """Base schema for simple named entities (Genre, Star, Director, Certification)."""
+
     name: str = Field(..., min_length=1, max_length=150)
 
 
 class EntityResponseSchema(BaseNameSchema):
     """Response schema with ID and name."""
+
     id: int
     model_config = ConfigDict(from_attributes=True)
 
 
 class GenreWithCountSchema(EntityResponseSchema):
     """Genre response schema including the total number of movies in that genre."""
+
     movie_count: int = 0
 
 
 class MovieCreateSchema(BaseModel):
     """Schema for creating a new movie (Moderator/Admin only)."""
+
     name: str = Field(..., max_length=255)
     year: int = Field(..., ge=1888, le=2100)
     time: int = Field(..., gt=0, description="Duration in minutes")
@@ -40,6 +45,7 @@ class MovieCreateSchema(BaseModel):
 
 class MovieUpdateSchema(BaseModel):
     """Schema for partial updates to an existing movie."""
+
     name: Optional[str] = Field(None, max_length=255)
     year: Optional[int] = Field(None, ge=1888, le=2100)
     time: Optional[int] = Field(None, gt=0)
@@ -57,6 +63,7 @@ class MovieUpdateSchema(BaseModel):
 
 class MovieListItemSchema(BaseModel):
     """Compact movie schema for catalog listings."""
+
     id: int
     uuid: UUID
     name: str
@@ -72,6 +79,7 @@ class MovieListItemSchema(BaseModel):
 
 class MovieDetailSchema(MovieListItemSchema):
     """Detailed movie schema including full description, cast, and ratings."""
+
     votes: int
     meta_score: Optional[float]
     gross: Optional[float]
@@ -85,6 +93,7 @@ class MovieDetailSchema(MovieListItemSchema):
 
 class PaginatedMoviesResponseSchema(BaseModel):
     """Paginated response wrapper for movie listings."""
+
     total: int
     page: int
     per_page: int
@@ -93,22 +102,26 @@ class PaginatedMoviesResponseSchema(BaseModel):
 
 class MovieLikeSchema(BaseModel):
     """Schema for liking or disliking a movie."""
+
     is_like: bool
 
 
 class MovieRatingSchema(BaseModel):
     """Schema for rating a movie on a 1-10 scale."""
+
     rating: int = Field(..., ge=1, le=10)
 
 
 class MovieCommentCreateSchema(BaseModel):
     """Schema for posting a comment or reply on a movie."""
+
     content: str = Field(..., min_length=1, max_length=2000)
     parent_id: Optional[int] = None
 
 
 class MovieCommentResponseSchema(BaseModel):
     """Schema for displaying a movie comment."""
+
     id: int
     user_id: int
     movie_id: int

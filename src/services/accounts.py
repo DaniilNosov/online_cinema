@@ -1,34 +1,36 @@
 import secrets
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timedelta, timezone
+
 from fastapi import HTTPException, UploadFile, status
-from sqlalchemy import select, delete
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from src.config.settings import settings
 from src.database.models.accounts import (
+    ActivationToken,
+    PasswordResetToken,
+    RefreshToken,
     User,
     UserGroup,
     UserGroupEnum,
     UserProfile,
-    ActivationToken,
-    PasswordResetToken,
-    RefreshToken,
 )
+from src.notifications.emails import send_activation_email, send_password_reset_email
 from src.schemas.accounts import (
-    UserRegisterSchema,
-    UserLoginSchema,
-    TokenResponseSchema,
     PasswordChangeSchema,
-    PasswordResetRequestSchema,
     PasswordResetConfirmSchema,
-    UserProfileUpdateSchema,
+    PasswordResetRequestSchema,
+    TokenResponseSchema,
+    UserLoginSchema,
     UserProfileResponseSchema,
+    UserProfileUpdateSchema,
+    UserRegisterSchema,
 )
 from src.security.hash import hash_password, verify_password
 from src.security.jwt import create_access_token, create_refresh_token, decode_token
-from src.notifications.emails import send_activation_email, send_password_reset_email
 from src.storages.s3 import s3_client
+
 
 def _is_expired(expires_at: datetime) -> bool:
     """Safely check if a datetime has expired, handling both naive and aware datetimes."""
@@ -91,11 +93,7 @@ async def register_user(db: AsyncSession, data: UserRegisterSchema) -> dict:
 
 async def activate_account(db: AsyncSession, token: str) -> dict:
     """Activate a user account using a valid activation token."""
-    stmt = (
-        select(ActivationToken)
-        .options(selectinload(ActivationToken.user))
-        .where(ActivationToken.token == token)
-    )
+    stmt = select(ActivationToken).options(selectinload(ActivationToken.user)).where(ActivationToken.token == token)
     token_record = (await db.execute(stmt)).scalar_one_or_none()
 
     if not token_record:
@@ -121,11 +119,7 @@ async def activate_account(db: AsyncSession, token: str) -> dict:
 
 async def resend_activation_token(db: AsyncSession, email: str) -> dict:
     """Generate and send a new activation token if the previous one expired."""
-    stmt = (
-        select(User)
-        .options(selectinload(User.activation_token))
-        .where(User.email == email)
-    )
+    stmt = select(User).options(selectinload(User.activation_token)).where(User.email == email)
     user = (await db.execute(stmt)).scalar_one_or_none()
 
     if not user:
@@ -155,11 +149,7 @@ async def resend_activation_token(db: AsyncSession, email: str) -> dict:
 
 async def authenticate_user(db: AsyncSession, data: UserLoginSchema) -> TokenResponseSchema:
     """Verify credentials and issue JWT access and refresh tokens."""
-    stmt = (
-        select(User)
-        .options(selectinload(User.group))
-        .where(User.email == data.email)
-    )
+    stmt = select(User).options(selectinload(User.group)).where(User.email == data.email)
     user = (await db.execute(stmt)).scalar_one_or_none()
 
     if not user or not verify_password(data.password, user.hashed_password):
@@ -224,9 +214,7 @@ async def logout_user(db: AsyncSession, refresh_token: str) -> dict:
     return {"message": "Successfully logged out."}
 
 
-async def change_user_password(
-    db: AsyncSession, user: User, data: PasswordChangeSchema
-) -> dict:
+async def change_user_password(db: AsyncSession, user: User, data: PasswordChangeSchema) -> dict:
     """Change password for an authenticated user after verifying the old password."""
     if not verify_password(data.old_password, user.hashed_password):
         raise HTTPException(
@@ -239,15 +227,9 @@ async def change_user_password(
     return {"message": "Password changed successfully."}
 
 
-async def request_password_reset(
-    db: AsyncSession, data: PasswordResetRequestSchema
-) -> dict:
+async def request_password_reset(db: AsyncSession, data: PasswordResetRequestSchema) -> dict:
     """Generate a password reset token and send it to the user's email."""
-    stmt = (
-        select(User)
-        .options(selectinload(User.password_reset_token))
-        .where(User.email == data.email)
-    )
+    stmt = select(User).options(selectinload(User.password_reset_token)).where(User.email == data.email)
     user = (await db.execute(stmt)).scalar_one_or_none()
 
     if not user or not user.is_active:
@@ -266,9 +248,7 @@ async def request_password_reset(
     return {"message": "If that email is registered and active, a reset token has been sent."}
 
 
-async def confirm_password_reset(
-    db: AsyncSession, data: PasswordResetConfirmSchema
-) -> dict:
+async def confirm_password_reset(db: AsyncSession, data: PasswordResetConfirmSchema) -> dict:
     """Reset user password using a valid password reset token."""
     stmt = (
         select(PasswordResetToken)
@@ -312,9 +292,7 @@ async def get_or_create_profile(db: AsyncSession, user: User) -> UserProfile:
     return profile
 
 
-async def update_profile(
-    db: AsyncSession, user: User, data: UserProfileUpdateSchema
-) -> UserProfileResponseSchema:
+async def update_profile(db: AsyncSession, user: User, data: UserProfileUpdateSchema) -> UserProfileResponseSchema:
     """Update personal profile fields for the authenticated user."""
     profile = await get_or_create_profile(db, user)
 
@@ -327,9 +305,7 @@ async def update_profile(
     return UserProfileResponseSchema.model_validate(profile)
 
 
-async def upload_user_avatar(
-    db: AsyncSession, user: User, file: UploadFile
-) -> UserProfileResponseSchema:
+async def upload_user_avatar(db: AsyncSession, user: User, file: UploadFile) -> UserProfileResponseSchema:
     """Upload an avatar image to S3/MinIO and save the URL in the user's profile."""
     profile = await get_or_create_profile(db, user)
     avatar_url = await s3_client.upload_avatar(user.id, file)
@@ -340,9 +316,7 @@ async def upload_user_avatar(
     return UserProfileResponseSchema.model_validate(profile)
 
 
-async def change_user_role(
-    db: AsyncSession, target_user_id: int, new_role: UserGroupEnum
-) -> dict:
+async def change_user_role(db: AsyncSession, target_user_id: int, new_role: UserGroupEnum) -> dict:
     """Change a user's group (role). Restricted to ADMIN users."""
     stmt = select(User).where(User.id == target_user_id)
     target_user = (await db.execute(stmt)).scalar_one_or_none()

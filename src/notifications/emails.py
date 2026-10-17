@@ -1,5 +1,7 @@
 from email.message import EmailMessage
+
 import aiosmtplib
+
 from src.config.settings import settings
 
 

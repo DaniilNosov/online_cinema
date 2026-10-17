@@ -24,5 +24,4 @@ COPY alembic.ini ./
 
 EXPOSE 8000
 
-# Run database migrations and start the FastAPI server
 CMD ["sh", "-c", "alembic upgrade head && uvicorn src.main:app --host 0.0.0.0 --port 8000"]
